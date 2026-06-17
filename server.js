@@ -127,16 +127,15 @@ app.post('/mcp', async (req, res) => {
           };
         } catch (err) {
           console.error('[upload_to_drive] 오류:', err);
-          const detail =
-            err.response?.data?.error_description ||
-            (err.response?.data ? JSON.stringify(err.response.data) : null) ||
-            err.message ||
-            String(err);
+          const failedUrl = err.config?.url || err.response?.config?.url || '(알수없음)';
+          const status = err.response?.status || err.code || '(알수없음)';
+          const dataDetail = err.response?.data ? JSON.stringify(err.response.data) : null;
+          const detail = dataDetail || err.message || String(err);
           return {
             content: [
               {
                 type: 'text',
-                text: `드라이브 업로드 실패: ${detail}`,
+                text: `드라이브 업로드 실패: ${detail}\n- 실패한 요청 URL: ${failedUrl}\n- 상태코드: ${status}`,
               },
             ],
             isError: true,
