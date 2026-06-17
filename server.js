@@ -127,11 +127,16 @@ app.post('/mcp', async (req, res) => {
           };
         } catch (err) {
           console.error('[upload_to_drive] 오류:', err);
+          const detail =
+            err.response?.data?.error_description ||
+            (err.response?.data ? JSON.stringify(err.response.data) : null) ||
+            err.message ||
+            String(err);
           return {
             content: [
               {
                 type: 'text',
-                text: `드라이브 업로드 실패: ${err.message || String(err)}`,
+                text: `드라이브 업로드 실패: ${detail}`,
               },
             ],
             isError: true,
