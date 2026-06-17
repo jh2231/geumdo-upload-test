@@ -13,19 +13,23 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
 
-// 구글 드라이브 업로드용 — 서비스 계정 인증 (환경변수 GOOGLE_SERVICE_ACCOUNT_KEY에서 읽음)
-// 키 파일 자체는 절대 코드/깃허브에 포함하지 않음. Render 환경변수로만 주입.
+// 구글 드라이브 업로드용 — OAuth(실제 계정) 인증.
+// (서비스 계정 방식은 "Service Accounts do not have storage quota" 오류로 일반 개인
+//  드라이브 폴더에는 쓸 수 없음이 확인됨 — 무료/개인 Gmail 계정에서는 OAuth가 유일한 방법)
+// 클라이언트ID/시크릿/refresh token 모두 코드에 포함하지 않음. Render 환경변수로만 주입.
 function getDriveClient() {
-  const raw = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
-  if (!raw) {
-    throw new Error('GOOGLE_SERVICE_ACCOUNT_KEY 환경변수가 설정되어 있지 않습니다.');
+  const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
+  const refreshToken = process.env.GOOGLE_OAUTH_REFRESH_TOKEN;
+  if (!clientId || !clientSecret || !refreshToken) {
+    throw new Error(
+      'GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET / GOOGLE_OAUTH_REFRESH_TOKEN ' +
+        '환경변수가 모두 설정되어 있어야 합니다.'
+    );
   }
-  const credentials = JSON.parse(raw);
-  const auth = new google.auth.GoogleAuth({
-    credentials,
-    scopes: ['https://www.googleapis.com/auth/drive'],
-  });
-  return google.drive({ version: 'v3', auth });
+  const oauth2Client = new google.auth.OAuth2(clientId, clientSecret);
+  oauth2Client.setCredentials({ refresh_token: refreshToken });
+  return google.drive({ version: 'v3', auth: oauth2Client });
 }
 
 const app = express();
