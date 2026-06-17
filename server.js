@@ -7,9 +7,26 @@
 import express from 'express';
 import fs from 'node:fs';
 import path from 'node:path';
+import { Readable } from 'node:stream';
+import { google } from 'googleapis';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
+
+// 구글 드라이브 업로드용 — 서비스 계정 인증 (환경변수 GOOGLE_SERVICE_ACCOUNT_KEY에서 읽음)
+// 키 파일 자체는 절대 코드/깃허브에 포함하지 않음. Render 환경변수로만 주입.
+function getDriveClient() {
+  const raw = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
+  if (!raw) {
+    throw new Error('GOOGLE_SERVICE_ACCOUNT_KEY 환경변수가 설정되어 있지 않습니다.');
+  }
+  const credentials = JSON.parse(raw);
+  const auth = new google.auth.GoogleAuth({
+    credentials,
+    scopes: ['https://www.googleapis.com/auth/drive'],
+  });
+  return google.drive({ version: 'v3', auth });
+}
 
 const app = express();
 
@@ -54,6 +71,68 @@ app.post('/mcp', async (req, res) => {
             },
           ],
         };
+      }
+    );
+
+    server.tool(
+      'upload_to_drive',
+      '서비스 계정 인증으로 base64 파일을 구글 드라이브의 지정된 폴더에 직접 업로드한다. ' +
+        'folderId는 드라이브 폴더 URL의 마지막 부분(.../folders/ 뒤 문자열)을 그대로 넣으면 된다. ' +
+        '대상 폴더는 사전에 서비스 계정 이메일과 "편집자" 권한으로 공유되어 있어야 한다.',
+      {
+        filename: z.string().describe('드라이브에 저장할 파일명 (예: 점검자_26.06.17_검토보고서.pptx)'),
+        base64Content: z.string().describe('파일 전체 바이트를 base64로 인코딩한 문자열'),
+        folderId: z.string().describe('업로드할 구글 드라이브 폴더 ID'),
+        mimeType: z
+          .string()
+          .optional()
+          .describe('파일 MIME 타입 (예: application/vnd.openxmlformats-officedocument.presentationml.presentation). 생략 시 자동 추정'),
+      },
+      async ({ filename, base64Content, folderId, mimeType }) => {
+        try {
+          const buffer = Buffer.from(base64Content, 'base64');
+          const sizeMB = (buffer.length / 1024 / 1024).toFixed(2);
+          const drive = getDriveClient();
+
+          const res = await drive.files.create({
+            requestBody: {
+              name: filename,
+              parents: [folderId],
+            },
+            media: {
+              mimeType: mimeType || 'application/octet-stream',
+              body: Readable.from(buffer),
+            },
+            fields: 'id, name, webViewLink',
+          });
+
+          console.log(`[upload_to_drive] ${filename} -> ${buffer.length} bytes (${sizeMB} MB) -> ${res.data.id}`);
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text:
+                  `드라이브 업로드 성공\n` +
+                  `- 파일명: ${res.data.name}\n` +
+                  `- 수신 용량: ${buffer.length.toLocaleString()} bytes (${sizeMB} MB)\n` +
+                  `- 파일 ID: ${res.data.id}\n` +
+                  `- 링크: ${res.data.webViewLink}`,
+              },
+            ],
+          };
+        } catch (err) {
+          console.error('[upload_to_drive] 오류:', err);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `드라이브 업로드 실패: ${err.message || String(err)}`,
+              },
+            ],
+            isError: true,
+          };
+        }
       }
     );
 
